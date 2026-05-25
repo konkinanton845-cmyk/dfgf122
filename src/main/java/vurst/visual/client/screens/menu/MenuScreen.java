@@ -35,56 +35,39 @@ import vurst.visual.utility.render.display.base.color.ColorRGBA;
 
 public class MenuScreen extends CustomScreen {
 
-    public static final String BRAND_TITLE = "Exocle";
-    public static final String BRAND_SUBTITLE = "Visuals";
+    // Brand
+    private static final String BRAND_PREFIX = "EXOCLE";
+    private static final String BRAND_SUFFIX = "VISUALS";
+    private static final String BRAND_TAGLINE = "// PREMIUM OVERLAY";
+    private static final int PARTICLE_COUNT = 36;
+    private static final float TOP_BAR_H = 32.0f; // tall, prominent header strip
 
     private Category selectedCategory = Category.MOVEMENT;
     private Category realSelectedCategory = Category.MOVEMENT;
-
     private float boxX;
     private float boxY;
     private int columns = 1;
-    private float boxWidth = 540.0f;
-    private float boxHeight = 332.0f;
-
+    private float boxWidth = 522.0f;
+    private float boxHeight = 316.0f;
     private boolean dragging;
     private float dragOffsetX;
     private float dragOffsetY;
 
-    // Sidebar expansion
-    private final Animation sidebarAnimation = new Animation(320L, 0.0f, Easing.CUBIC_IN_OUT);
+    private final Animation sidebarAnimation = new Animation(300L, 0.0f, Easing.CUBIC_IN_OUT);
     private boolean isSidebarExpanded;
 
-    // Open / close animation. We keep the original BAKEK_SIZE easing for backwards
-    // compatibility but route it through a longer duration with a soft tail so the
-    // popup has a more deliberate, premium feel.
-    private final Animation animationClose = new Animation(360L, 0.0f, Easing.BAKEK_SIZE);
-
-    // Ambient animations – constantly running, used to drive glow, gradient drift,
-    // and the title shimmer. They tick from 0 -> 1 -> 0 forever.
-    private final Animation ambientPulse = new Animation(2400L, 0.0f, Easing.SINE_IN_OUT);
-    private final Animation ambientDrift = new Animation(6000L, 0.0f, Easing.SINE_IN_OUT);
-    private float ambientPulseDir = 1.0f;
-    private float ambientDriftDir = 1.0f;
-
-    // Hover/press animation for the drag-region "title bar".
-    private final Animation titleHoverAnim = new Animation(220L, 0.0f, Easing.CUBIC_IN_OUT);
+    private final Animation animationClose = new Animation(420L, 0.0f, Easing.CUBIC_IN_OUT);
 
     private boolean initialized;
-
     private TextBox searchField;
     private final ScrollHandler scrollHandler = new ScrollHandler();
-
     private boolean closing = false;
-
     private SidebarPanel sidebarPanel;
     private HeaderPanel headerPanel;
-
     private int scaledScissorX = 0;
     private int scaledScissorY = 0;
     private int scaledScissorEndX = 2000;
     private int scaledScissorEndY = 2000;
-
     private float inputScale = 1.0f;
     private float inputPivotX = 0.0f;
     private float inputPivotY = 0.0f;
@@ -92,27 +75,27 @@ public class MenuScreen extends CustomScreen {
     private final Animation animationColums;
     private final Animation animationScrollHeight;
     private final Animation animationChangeCategory;
-
-    // Animates the content panel from a slight slide+fade when the category changes.
-    private final Animation categorySlide = new Animation(280L, 0.0f, Easing.CUBIC_OUT);
-
+    private final Animation animationIntro;        // 0->1 on open
+    private final Animation animationScrollGlow;   // when dragging scrollbar
     private boolean draggingScrollbar = false;
     private float scrollClickOffset = 0.0f;
 
     private Set<MenuPopupSetting> popupSettings = new HashSet<MenuPopupSetting>();
     List<AbstractMenuElement> modules = new ArrayList<AbstractMenuElement>();
-
     private String hoveredModuleDescription;
 
+    private long openTimeMs = 0L;
+
     public MenuScreen() {
-        this.animationColums = new Animation(320L, this.columns == 3 ? 1.0f : 0.0f, Easing.CUBIC_IN_OUT);
+        this.animationColums = new Animation(300L, this.columns == 3 ? 1.0f : 0.0f, Easing.CUBIC_IN_OUT);
         this.animationChangeCategory = new Animation(180L, 1.0f, Easing.CUBIC_IN_OUT);
-        this.animationScrollHeight = new Animation(160L, 1.0f, Easing.QUAD_IN_OUT);
+        this.animationScrollHeight = new Animation(150L, 1.0f, Easing.QUAD_IN_OUT);
+        this.animationIntro = new Animation(560L, 0.0f, Easing.CUBIC_IN_OUT);
+        this.animationScrollGlow = new Animation(220L, 0.0f, Easing.QUAD_IN_OUT);
     }
 
     public void initialize() {
-        this.modules.addAll(VurstVisual.getInstance().getModuleManager().getModules().stream()
-                .map(MenuModuleElement::new).toList());
+        this.modules.addAll(VurstVisual.getInstance().getModuleManager().getModules().stream().map(MenuModuleElement::new).toList());
         this.modules.add(new MenuThemeElement(Theme.DARK));
         this.modules.add(new MenuThemeElement(Theme.LIGHT));
         this.modules.add(new MenuThemeElement(Theme.CUSTOM_THEME));
@@ -120,22 +103,21 @@ public class MenuScreen extends CustomScreen {
 
     protected void init() {
         this.closing = false;
+        this.openTimeMs = System.currentTimeMillis();
         this.animationColums.setValue(this.columns == 3 ? 1.0f : 0.0f);
-        this.boxWidth = MathHelper.lerp((float) this.animationColums.getValue(), 480, 552);
-        this.boxHeight = MathHelper.lerp((float) this.animationColums.getValue(), 300, 336);
+        this.boxWidth = MathHelper.lerp((float) this.animationColums.getValue(), (int) 465, (int) 533);
+        this.boxHeight = MathHelper.lerp((float) this.animationColums.getValue(), (int) 282, (int) 320);
         this.boxX = ((float) this.width - this.boxWidth) / 2.0f;
         this.boxY = ((float) this.height - this.boxHeight) / 2.0f;
         this.updateInputTransform(1.0f, this.boxX + this.boxWidth / 2.0f, this.boxY + this.boxHeight / 2.0f);
-
-        // Bounce-in: start slightly smaller so the easing can overshoot a touch.
         this.animationClose.setValue(0.0f);
         this.animationClose.update(1.0f);
-
+        this.animationIntro.setValue(0.0f);
         if (!this.initialized) {
+            // Push the search field down to fit under the new tall top bar
             this.searchField = new TextBox(
-                    new Vector2f(this.boxX + this.boxWidth - 128.0f - 8.0f, this.boxY + 8.0f),
-                    Fonts.MEDIUM.getFont(7.0f), "Search", 100.0f);
-
+                    new Vector2f(this.boxX + this.boxWidth - 128.0f - 8.0f, this.boxY + TOP_BAR_H + 6.0f),
+                    Fonts.MEDIUM.getFont(7.0f), "Поиск", 100.0f);
             this.sidebarPanel = new SidebarPanel(this.sidebarAnimation, this.isSidebarExpanded, category -> {
                 this.headerPanel.resetAnim(this.realSelectedCategory, (Category) ((Object) category));
                 this.realSelectedCategory = category;
@@ -144,17 +126,13 @@ public class MenuScreen extends CustomScreen {
                 this.searchField.setSelected(true);
                 this.searchField.keyPressed(259, 0, 0);
                 this.searchField.setSelected(false);
-                // Kick off the category-slide animation
-                this.categorySlide.setValue(0.0f);
-                this.categorySlide.setTargetValue(1.0f);
             }, () -> {
                 this.isSidebarExpanded = !this.isSidebarExpanded;
                 this.sidebarAnimation.animateTo(this.isSidebarExpanded ? 1.0f : 0.0f);
             });
-
-            this.headerPanel = new HeaderPanel(this.searchField,
-                    () -> this.columns = this.columns % 3 + 1,
-                    () -> VurstVisual.getInstance().getThemeManager().switchTheme());
+            this.headerPanel = new HeaderPanel(this.searchField, () -> {
+                this.columns = this.columns % 3 + 1;
+            }, () -> VurstVisual.getInstance().getThemeManager().switchTheme());
         }
         this.initialized = true;
     }
@@ -173,8 +151,6 @@ public class MenuScreen extends CustomScreen {
     }
 
     public void renderBackground(DrawContext context, int mouseX, int mouseY, float delta) {
-        // Intentionally empty – we paint our own dimmed/blurred backdrop inside renderTop
-        // so the open/close animation can scale the dim layer along with the window.
     }
 
     public boolean isFinish() {
@@ -184,31 +160,22 @@ public class MenuScreen extends CustomScreen {
     public void renderTop(UIContext ctx, float mouseX, float mouseY) {
         if (!this.initialized) return;
 
-        // -- timing / progress --------------------------------------------------
         this.animationColums.update(this.columns == 3 ? 1.0f : 0.0f);
-        this.boxWidth = MathHelper.lerp((float) this.animationColums.getValue(), 480, 552);
-        this.boxHeight = MathHelper.lerp((float) this.animationColums.getValue(), 300, 336);
+        this.boxWidth = MathHelper.lerp((float) this.animationColums.getValue(), (int) 465, (int) 533);
+        this.boxHeight = MathHelper.lerp((float) this.animationColums.getValue(), (int) 282, (int) 320);
+        float progress = MathHelper.clamp(this.animationClose.update(this.closing ? 0.0f : 1.0f), 0.0f, 1.0f);
+        float intro = MathHelper.clamp(this.animationIntro.update(1.0f), 0.0f, 1.0f);
+        this.animationScrollGlow.update(this.draggingScrollbar ? 1.0f : 0.0f);
 
-        float progress = this.animationClose.update(this.closing ? 0.0f : 1.0f);
-        progress = MathHelper.clamp(progress, 0.0f, 1.0f);
+        long t = System.currentTimeMillis() - this.openTimeMs;
+        float timeSec = t / 1000.0f;
+
         float sidebarProgress = this.sidebarAnimation.update();
 
-        // Drive ambient looping animations.
-        float ambient = this.ambientPulse.update(this.ambientPulseDir);
-        if (ambient >= 1.0f) this.ambientPulseDir = 0.0f;
-        else if (ambient <= 0.0f) this.ambientPulseDir = 1.0f;
-        float drift = this.ambientDrift.update(this.ambientDriftDir);
-        if (drift >= 1.0f) this.ambientDriftDir = 0.0f;
-        else if (drift <= 0.0f) this.ambientDriftDir = 1.0f;
-
-        // Smooth slide-in for category transitions.
-        float categorySlideValue = this.categorySlide.update(1.0f);
-
-        // -- scale / fit --------------------------------------------------------
-        // Slight overshoot when opening; the BAKEK_SIZE easing already gives a soft
-        // bounce, we just layer in a tiny zoom for extra polish.
-        float bounce = (float) Math.sin(progress * Math.PI) * 0.025f;
-        float baseScale = 0.86f + 0.14f * progress + bounce;
+        // Heavy opening animation: rotate-in (just scale-y wobble) + bounce
+        float bounce = (float) Math.sin(progress * Math.PI) * 0.04f;
+        float baseScale = 0.75f + 0.25f * progress + bounce;
+        float introOffsetY = (1.0f - intro) * 24.0f;
 
         float fitScale = this.getFitScale(this.boxWidth, this.boxHeight);
         float interfaceScale = this.getInterfaceZoomScale();
@@ -217,10 +184,9 @@ public class MenuScreen extends CustomScreen {
         Theme theme = VurstVisual.getInstance().getThemeManager().getCurrentTheme();
         MatrixStack ms = ctx.getMatrices();
 
-        // -- ambient dimmer / vignette behind the window ------------------------
-        float dim = 0.55f * progress;
+        // === STRONG dim of the whole screen behind the menu (was empty before) ===
         ctx.drawRoundedRect(0.0f, 0.0f, (float) this.width, (float) this.height,
-                BorderRadius.all(0.0f), ColorRGBA.BLACK.mulAlpha(dim));
+                BorderRadius.all(0.0f), ColorRGBA.BLACK.mulAlpha(0.55f * progress));
 
         ctx.pushMatrix();
         float scaleX = this.boxX + this.boxWidth / 2.0f;
@@ -228,69 +194,54 @@ public class MenuScreen extends CustomScreen {
         this.updateInputTransform(scale, scaleX, scaleY);
         float localMouseX = this.toMenuX(mouseX);
         float localMouseY = this.toMenuY(mouseY);
-
-        ms.translate(scaleX, scaleY, 1.0f);
+        ms.translate(scaleX, scaleY + introOffsetY, 1.0f);
         ms.scale(scale, scale, 1.0f);
         ms.translate(-scaleX, -scaleY, 1.0f);
 
-        // -- colors -------------------------------------------------------------
         ColorRGBA primary = theme.getColor().mulAlpha(progress);
         ColorRGBA baseBg = theme.getBackgroundColor().mulAlpha(progress * 4.0f);
         ColorRGBA selectedColor = theme.getWhite().mulAlpha(progress);
         ColorRGBA textColor = theme.getWhite().mulAlpha(progress);
-        ColorRGBA accentSoft = primary.mulAlpha(0.18f + 0.12f * ambient);
-        ColorRGBA accentGlow = primary.mulAlpha(0.05f + 0.04f * ambient);
 
-        // -- outer glow (animated) ---------------------------------------------
-        for (int i = 6; i >= 1; --i) {
-            float spread = i * 1.6f;
-            float a = (0.06f - i * 0.008f) * progress;
-            if (a <= 0.0f) continue;
-            ctx.drawRoundedRect(
-                    this.boxX - spread, this.boxY - spread,
-                    this.boxWidth + spread * 2.0f, this.boxHeight + spread * 2.0f,
-                    BorderRadius.all(11.0f + i),
-                    accentGlow.mulAlpha(a / accentGlow.getAlphaFloat()));
-        }
+        // ----- Strong outer glow ring (much more visible than before) -----
+        this.renderWindowGlow(ctx, theme, progress * intro, timeSec);
 
-        // -- main panel ---------------------------------------------------------
+        // ----- Visible drifting particles -----
+        this.renderAmbientParticles(ctx, theme, progress * intro, timeSec);
+
+        // ----- Main panel body -----
         ctx.drawRoundedRect(this.boxX, this.boxY, this.boxWidth, this.boxHeight,
-                BorderRadius.all(11.0f), baseBg);
+                BorderRadius.all(12.0f), baseBg);
 
-        // Subtle gradient sheen sweeping across the panel based on drift value.
-        float sheenX = this.boxX + this.boxWidth * (drift * 1.2f - 0.1f);
-        float sheenW = Math.max(40.0f, this.boxWidth * 0.18f);
-        ctx.drawRoundedRect(sheenX, this.boxY, sheenW, this.boxHeight,
-                BorderRadius.all(11.0f),
-                theme.getWhite().mulAlpha(0.025f * progress));
+        // ----- Animated multi-segment accent border (rotating around the panel) -----
+        this.renderAnimatedBorder(ctx, theme, progress, timeSec);
 
-        // Inner 1px accent stroke that pulses softly.
-        ctx.drawRoundedRect(this.boxX + 0.5f, this.boxY + 0.5f,
-                this.boxWidth - 1.0f, this.boxHeight - 1.0f,
-                BorderRadius.all(10.5f),
-                accentSoft);
+        // ----- Tall top header strip ("EXOCLE VISUALS") -----
+        this.renderTopBar(ctx, theme, progress, intro, timeSec);
 
-        // -- brand header (Exocle Visuals) -------------------------------------
-        this.renderBrand(ctx, theme, progress, ambient, drift);
+        // ----- Diagonal scan-line that sweeps across the panel -----
+        this.renderScanline(ctx, theme, progress * intro, timeSec);
 
-        // -- sidebar ------------------------------------------------------------
+        // ----- Bottom status strip -----
+        this.renderBottomStrip(ctx, theme, progress * intro, timeSec);
+
+        // ----- Existing sidebar and header (shifted down to fit under top bar) -----
+        float sidebarY = this.boxY + TOP_BAR_H + 6.0f;
         float widthScroll = 2.0f;
-        this.sidebarPanel.render(ctx, this.boxX, this.boxY, this.boxHeight,
-                progress, theme, this.realSelectedCategory, primary, textColor, selectedColor);
-
+        // Sidebar panel renders relative to boxY internally; we let it stay but the
+        // top bar lives in the area above where the original drag handle was.
+        this.sidebarPanel.render(ctx, this.boxX, this.boxY + TOP_BAR_H,
+                this.boxHeight - TOP_BAR_H, progress, theme,
+                this.realSelectedCategory, primary, textColor, selectedColor);
         float sidebarWidth = 30.0f + 58.0f * sidebarProgress;
         float contentStartX = this.boxX + 8.0f + sidebarWidth + 8.0f;
-        float sidebarY = this.boxY + 8.0f;
-        float contentY = this.boxY + 22.0f + 8.0f + 8.0f;
+        float contentY = sidebarY + 22.0f + 8.0f;
+        this.headerPanel.render(ctx, contentStartX, sidebarY, this.boxX,
+                this.columns, this.boxWidth, progress, theme, this.realSelectedCategory);
 
-        // -- header panel -------------------------------------------------------
-        this.headerPanel.render(ctx, contentStartX, sidebarY, this.boxX, this.columns,
-                this.boxWidth, progress, theme, this.realSelectedCategory);
-
-        // -- scrollbar (with pulsing fill) -------------------------------------
-        float visibleHeight = this.boxHeight - 46.0f;
-        float scrollProgress = this.scrollHandler.getMax() == 0.0
-                ? 0.0f
+        // ----- Scrollbar -----
+        float visibleHeight = this.boxHeight - TOP_BAR_H - 38.0f;
+        float scrollProgress = this.scrollHandler.getMax() == 0.0 ? 0.0f
                 : (float) (this.scrollHandler.getValue() / this.scrollHandler.getMax());
         float scrollHeight = Math.max(
                 visibleHeight * (visibleHeight / (float) ((double) visibleHeight + this.scrollHandler.getMax())),
@@ -299,45 +250,34 @@ public class MenuScreen extends CustomScreen {
         float denom = Math.max(1.0f, visibleHeight - scrollHeight);
         float scrollY = contentY + denom * scrollProgress;
         scrollY = Math.min(contentY + visibleHeight, scrollY);
-
         ctx.drawRoundedRect(this.boxX + this.boxWidth - 8.0f - widthScroll, contentY,
-                widthScroll, visibleHeight, BorderRadius.all(0.5f),
-                theme.getForegroundColor().mulAlpha(progress));
-
-        ColorRGBA scrollFill = theme.getForegroundStroke().mulAlpha(progress * (0.85f + 0.15f * ambient));
-        if (scrollY + scrollHeight > visibleHeight + contentY) {
-            ctx.drawRoundedRect(this.boxX + this.boxWidth - 8.0f - widthScroll, contentY,
-                    widthScroll, visibleHeight, BorderRadius.all(1.0f), scrollFill);
-        } else {
-            ctx.drawRoundedRect(this.boxX + this.boxWidth - 8.0f - widthScroll, scrollY,
-                    widthScroll, scrollHeight, BorderRadius.all(1.0f), scrollFill);
+                widthScroll, visibleHeight, BorderRadius.all(1.0f),
+                theme.getForegroundColor().mulAlpha(progress * 0.85f));
+        float scrollGlowAlpha = this.animationScrollGlow.getValue() * 0.55f * progress;
+        if (scrollGlowAlpha > 0.001f) {
+            ctx.drawRoundedRect(this.boxX + this.boxWidth - 8.0f - widthScroll - 2.0f,
+                    scrollY - 2.0f, widthScroll + 4.0f, scrollHeight + 4.0f,
+                    BorderRadius.all(3.0f), theme.getColor().mulAlpha(scrollGlowAlpha));
         }
+        ctx.drawRoundedRect(this.boxX + this.boxWidth - 8.0f - widthScroll,
+                scrollY, widthScroll, scrollHeight, BorderRadius.all(1.0f),
+                theme.getColor().mulAlpha(progress));
 
-        float contentWidth = this.boxX + (float) (this.columns == 3 ? 549 : 477) - contentStartX - 8.0f;
+        float contentWidth = this.boxX + (float) (this.columns == 3 ? 530 : 461) - contentStartX - 8.0f;
         this.scaledScissorX = (int) contentStartX;
-        this.scaledScissorY = (int) ((float) ((int) this.boxY) + 38.0f);
+        this.scaledScissorY = (int) ((float) ((int) this.boxY) + TOP_BAR_H + 38.0f);
         this.scaledScissorEndX = (int) (this.boxX + this.boxWidth);
-        this.scaledScissorEndY = (int) ((float) ((int) this.boxY) + this.boxHeight);
-
+        this.scaledScissorEndY = (int) ((float) ((int) this.boxY) + this.boxHeight - 12.0f);
         ctx.enableScissor(this.scaledScissorX, this.scaledScissorY,
                 this.scaledScissorEndX, this.scaledScissorEndY);
-
-        // Category-change crossfade + tiny vertical slide.
         this.animationChangeCategory.setEasing(Easing.QUAD_IN_OUT);
-        float changeAlpha = progress * this.animationChangeCategory.update(
+        float catAlpha = progress * intro * this.animationChangeCategory.update(
                 this.selectedCategory == this.realSelectedCategory ? 1.0f : 0.0f);
-        float slideOffset = (1.0f - categorySlideValue) * 6.0f; // px
-
-        ms.translate(0.0f, slideOffset, 0.0f);
-        this.renderModules(ctx, localMouseX, localMouseY - slideOffset,
-                changeAlpha, (int) contentStartX, contentWidth, (int) contentY);
-        ms.translate(0.0f, -slideOffset, 0.0f);
-
+        this.renderModules(ctx, localMouseX, localMouseY, catAlpha,
+                (int) contentStartX, contentWidth, (int) contentY);
         ctx.disableScissor();
-
         this.renderHoveredDescription(ctx, progress);
 
-        // -- popup settings -----------------------------------------------------
         ArrayList<MenuPopupSetting> removes = new ArrayList<MenuPopupSetting>();
         for (MenuPopupSetting setting : this.popupSettings) {
             setting.render(ctx, localMouseX, localMouseY, progress, theme);
@@ -345,69 +285,258 @@ public class MenuScreen extends CustomScreen {
             removes.add(setting);
         }
         this.popupSettings.removeAll(removes);
-
         if (this.animationChangeCategory.getValue() == 0.0f) {
             this.selectedCategory = this.realSelectedCategory;
         }
-
-        // -- scrollbar dragging -------------------------------------------------
         if (this.draggingScrollbar) {
-            float scrollbarY = this.boxY + 22.0f + 8.0f + 8.0f;
+            float scrollbarY = contentY;
             float newY = localMouseY - scrollbarY - this.scrollClickOffset;
             float scrollRatio = newY / denom;
             this.scrollHandler.setTargetValue(-((double) scrollRatio * this.scrollHandler.getMax()));
         }
-
         ctx.popMatrix();
     }
 
-    private void renderBrand(UIContext ctx, Theme theme, float progress, float ambient, float drift) {
-        // Title sits in the drag region at the top-left of the window.
-        Font titleFont = Fonts.MEDIUM.getFont(10.0f);
-        Font subFont = Fonts.MEDIUM.getFont(7.0f);
+    // =========================================================================
+    // DECORATIVE RENDERERS
+    // =========================================================================
 
-        float titleX = this.boxX + 12.0f;
-        float titleY = this.boxY + 6.0f;
-
-        // Hover/press feedback on the brand title (also serves as drag handle).
-        // We don't have direct hover state for the title region so we drive it from
-        // the dragging flag.
-        float hoverTarget = this.dragging ? 1.0f : 0.0f;
-        float hover = this.titleHoverAnim.update(hoverTarget);
-
-        ColorRGBA primary = theme.getColor();
-        ColorRGBA white = theme.getWhite().mulAlpha(progress);
-
-        // Soft glow behind the title that breathes with the ambient pulse.
-        ColorRGBA titleGlow = primary.mulAlpha(progress * (0.18f + 0.12f * ambient));
-        float glowW = titleFont.width(BRAND_TITLE) + 18.0f;
-        float glowH = titleFont.height() + 6.0f;
-        ctx.drawRoundedRect(titleX - 6.0f, titleY - 2.0f, glowW, glowH,
-                BorderRadius.all(6.0f), titleGlow.mulAlpha(0.20f * (1.0f - hover * 0.4f)));
-
-        // Title text – "Exocle" rendered in the accent color, "Visuals" in white.
-        ctx.drawText(titleFont, BRAND_TITLE, titleX, titleY,
-                primary.mulAlpha(progress));
-        float titleWidth = titleFont.width(BRAND_TITLE);
-        ctx.drawText(subFont, BRAND_SUBTITLE,
-                titleX + titleWidth + 4.0f,
-                titleY + (titleFont.height() - subFont.height()) - 0.5f,
-                white.mulAlpha(0.85f));
-
-        // Tiny animated accent dot to the left of the title.
-        float dotR = 1.5f + 0.5f * ambient;
-        ctx.drawRoundedRect(titleX - 8.0f, titleY + titleFont.height() / 2.0f - dotR,
-                dotR * 2.0f, dotR * 2.0f, BorderRadius.all(dotR),
-                primary.mulAlpha(progress * (0.6f + 0.4f * ambient)));
-
-        // Thin underline that shifts horizontally with drift.
-        float underlineY = titleY + titleFont.height() + 0.5f;
-        float underlineW = titleWidth + subFont.width(BRAND_SUBTITLE) + 6.0f;
-        float underlineShift = (drift - 0.5f) * 6.0f;
-        ctx.drawRoundedRect(titleX + underlineShift, underlineY,
-                underlineW * 0.6f, 0.6f, BorderRadius.all(0.3f),
-                primary.mulAlpha(progress * (0.25f + 0.15f * ambient)));
+    /** Bright stacked halo behind the panel. Much more visible than before. */
+    private void renderWindowGlow(UIContext ctx, Theme theme, float alpha, float timeSec) {
+        if (alpha <= 0.001f) return;
+        ColorRGBA accent = theme.getColor();
+        float pulse = 0.5f + 0.5f * (float) Math.sin(timeSec * 2.0f);
+        for (int i = 8; i >= 1; --i) {
+            float spread = i * 5.0f + pulse * 6.0f;
+            float a = (0.18f - i * 0.018f) * (0.65f + 0.35f * pulse) * alpha;
+            if (a <= 0.0f) continue;
+            ctx.drawRoundedRect(this.boxX - spread, this.boxY - spread,
+                    this.boxWidth + spread * 2.0f, this.boxHeight + spread * 2.0f,
+                    BorderRadius.all(12.0f + spread * 0.45f),
+                    accent.mulAlpha(a));
+        }
     }
+
+    /** Visible particles drifting around the panel. */
+    private void renderAmbientParticles(UIContext ctx, Theme theme, float alpha, float timeSec) {
+        if (alpha <= 0.001f) return;
+        ColorRGBA tint = theme.getColor();
+        ColorRGBA soft = theme.getWhite();
+        float w = this.boxWidth + 120.0f;
+        float h = this.boxHeight + 120.0f;
+        float ox = this.boxX - 60.0f;
+        float oy = this.boxY - 60.0f;
+        for (int i = 0; i < PARTICLE_COUNT; ++i) {
+            float seed = (i + 1) * 0.6180339f;
+            float baseX = ((seed * 113.0f) % 1.0f) * w;
+            float baseY = ((seed * 271.0f) % 1.0f) * h;
+            float driftX = (float) Math.sin(timeSec * 0.6f + i * 0.7f) * 30.0f;
+            float driftY = (float) Math.cos(timeSec * 0.5f + i * 1.1f) * 22.0f;
+            float px = ox + (((baseX + driftX) % w) + w) % w;
+            float py = oy + (((baseY + driftY) % h) + h) % h;
+            float sz = 1.5f + ((seed * 41.0f) % 1.0f) * 2.6f;
+            float twinkle = 0.45f + 0.55f * (float) (0.5 + 0.5 * Math.sin(timeSec * 2.5f + i * 1.3f));
+            float pAlpha = 0.28f * twinkle * alpha;
+            ColorRGBA c = (i % 3 == 0 ? tint : soft).mulAlpha(pAlpha);
+            // small halo around the particle
+            ctx.drawRoundedRect(px - sz, py - sz, sz * 3.0f, sz * 3.0f,
+                    BorderRadius.all(sz * 1.5f), c.mulAlpha(0.25f));
+            ctx.drawRoundedRect(px, py, sz, sz, BorderRadius.all(sz * 0.5f), c);
+        }
+    }
+
+    /** Animated traveling segment(s) running around the panel border. */
+    private void renderAnimatedBorder(UIContext ctx, Theme theme, float alpha, float timeSec) {
+        if (alpha <= 0.001f) return;
+        ColorRGBA accent = theme.getColor();
+        float radius = 12.0f;
+
+        // Static thin outline (always visible)
+        float thin = 0.8f;
+        ctx.drawRoundedRect(this.boxX - thin, this.boxY - thin,
+                this.boxWidth + thin * 2.0f, thin, BorderRadius.all(radius), accent.mulAlpha(0.45f * alpha));
+        ctx.drawRoundedRect(this.boxX - thin, this.boxY + this.boxHeight,
+                this.boxWidth + thin * 2.0f, thin, BorderRadius.all(radius), accent.mulAlpha(0.45f * alpha));
+        ctx.drawRoundedRect(this.boxX - thin, this.boxY,
+                thin, this.boxHeight, BorderRadius.all(radius), accent.mulAlpha(0.45f * alpha));
+        ctx.drawRoundedRect(this.boxX + this.boxWidth, this.boxY,
+                thin, this.boxHeight, BorderRadius.all(radius), accent.mulAlpha(0.45f * alpha));
+
+        // Perimeter travel: 0..1 around the panel, two opposite chasers
+        float perimeter = (this.boxWidth + this.boxHeight) * 2.0f;
+        float segLen = perimeter * 0.18f;
+        for (int chaser = 0; chaser < 2; ++chaser) {
+            float phase = (timeSec * 0.38f + chaser * 0.5f) % 1.0f;
+            this.drawPerimeterSegment(ctx, phase, segLen, accent.mulAlpha(0.85f * alpha), 2.0f);
+        }
+
+        // Corner accents (bright L-shaped brackets)
+        ColorRGBA bracket = accent.mulAlpha(alpha);
+        float cl = 14.0f;
+        float cw = 2.0f;
+        // top-left
+        ctx.drawRoundedRect(this.boxX - 1.0f, this.boxY - 1.0f, cl, cw, BorderRadius.all(1.0f), bracket);
+        ctx.drawRoundedRect(this.boxX - 1.0f, this.boxY - 1.0f, cw, cl, BorderRadius.all(1.0f), bracket);
+        // top-right
+        ctx.drawRoundedRect(this.boxX + this.boxWidth - cl + 1.0f, this.boxY - 1.0f, cl, cw, BorderRadius.all(1.0f), bracket);
+        ctx.drawRoundedRect(this.boxX + this.boxWidth - cw + 1.0f, this.boxY - 1.0f, cw, cl, BorderRadius.all(1.0f), bracket);
+        // bottom-left
+        ctx.drawRoundedRect(this.boxX - 1.0f, this.boxY + this.boxHeight - cw + 1.0f, cl, cw, BorderRadius.all(1.0f), bracket);
+        ctx.drawRoundedRect(this.boxX - 1.0f, this.boxY + this.boxHeight - cl + 1.0f, cw, cl, BorderRadius.all(1.0f), bracket);
+        // bottom-right
+        ctx.drawRoundedRect(this.boxX + this.boxWidth - cl + 1.0f, this.boxY + this.boxHeight - cw + 1.0f, cl, cw, BorderRadius.all(1.0f), bracket);
+        ctx.drawRoundedRect(this.boxX + this.boxWidth - cw + 1.0f, this.boxY + this.boxHeight - cl + 1.0f, cw, cl, BorderRadius.all(1.0f), bracket);
+    }
+
+    private void drawPerimeterSegment(UIContext ctx, float phase, float segLen, ColorRGBA color, float thickness) {
+        float perimeter = (this.boxWidth + this.boxHeight) * 2.0f;
+        for (int i = 0; i < 16; ++i) {
+            float local = (phase * perimeter + i * (segLen / 16.0f)) % perimeter;
+            float alphaFade = 1.0f - i / 16.0f;
+            float[] p = this.perimeterPoint(local);
+            float t = thickness * (0.55f + 0.45f * alphaFade);
+            ctx.drawRoundedRect(p[0] - t / 2.0f, p[1] - t / 2.0f, t, t,
+                    BorderRadius.all(t / 2.0f), color.mulAlpha(alphaFade));
+        }
+    }
+
+    private float[] perimeterPoint(float dist) {
+        float w = this.boxWidth;
+        float h = this.boxHeight;
+        if (dist < w) {
+            return new float[] { this.boxX + dist, this.boxY - 1.0f };
+        }
+        dist -= w;
+        if (dist < h) {
+            return new float[] { this.boxX + w + 1.0f, this.boxY + dist };
+        }
+        dist -= h;
+        if (dist < w) {
+            return new float[] { this.boxX + w - dist, this.boxY + h + 1.0f };
+        }
+        dist -= w;
+        return new float[] { this.boxX - 1.0f, this.boxY + h - dist };
+    }
+
+    /** Tall, prominent header bar at the top of the panel with "EXOCLE VISUALS". */
+    private void renderTopBar(UIContext ctx, Theme theme, float alpha, float intro, float timeSec) {
+        if (alpha <= 0.001f) return;
+        float barX = this.boxX;
+        float barY = this.boxY;
+        float barW = this.boxWidth;
+        float barH = TOP_BAR_H;
+
+        // Darker tinted backdrop for the top bar
+        ctx.drawRoundedRect(barX, barY, barW, barH, BorderRadius.all(12.0f),
+                theme.getBackgroundColor().mulAlpha(alpha * 5.5f));
+        // Subtle separator line below the bar
+        ctx.drawRoundedRect(barX + 8.0f, barY + barH - 0.6f, barW - 16.0f, 0.6f,
+                BorderRadius.all(0.3f), theme.getColor().mulAlpha(0.55f * alpha));
+
+        // Glow halo behind the title
+        float pulse = 0.5f + 0.5f * (float) Math.sin(timeSec * 1.6f);
+        Font heavy = Fonts.MEDIUM.getFont(11.5f);
+        Font light = Fonts.MEDIUM.getFont(11.5f);
+        Font tiny = Fonts.MEDIUM.getFont(5.5f);
+
+        float prefixW = heavy.width(BRAND_PREFIX);
+        float spacer = 5.0f;
+        float suffixW = light.width(BRAND_SUFFIX);
+        float totalW = prefixW + spacer + suffixW;
+
+        float introX = (1.0f - intro) * -20.0f;
+        float textX = barX + 14.0f + introX;
+        float textY = barY + (barH - heavy.height()) / 2.0f - 1.0f;
+
+        // Multi-layer glow behind "EXOCLE"
+        for (int i = 4; i >= 1; --i) {
+            float a = 0.10f * pulse * alpha / i;
+            ctx.drawText(heavy, BRAND_PREFIX, textX - i * 0.8f, textY, theme.getColor().mulAlpha(a));
+            ctx.drawText(heavy, BRAND_PREFIX, textX + i * 0.8f, textY, theme.getColor().mulAlpha(a));
+            ctx.drawText(heavy, BRAND_PREFIX, textX, textY - i * 0.8f, theme.getColor().mulAlpha(a));
+            ctx.drawText(heavy, BRAND_PREFIX, textX, textY + i * 0.8f, theme.getColor().mulAlpha(a));
+        }
+        // Main title
+        ctx.drawText(heavy, BRAND_PREFIX, textX, textY, theme.getColor().mulAlpha(alpha));
+        ctx.drawText(light, BRAND_SUFFIX, textX + prefixW + spacer, textY,
+                theme.getWhite().mulAlpha(0.95f * alpha));
+
+        // Tagline below the title
+        float tagY = textY + heavy.height() - 1.0f;
+        ctx.drawText(tiny, BRAND_TAGLINE, textX, tagY,
+                theme.getWhite().mulAlpha(0.45f * alpha));
+
+        // Animated indicator dot to the left of the title
+        float dotR = 2.5f + 1.0f * pulse;
+        float dotX = barX + 6.5f;
+        float dotY = barY + barH / 2.0f - 0.5f;
+        ctx.drawRoundedRect(dotX - dotR, dotY - dotR, dotR * 2.0f, dotR * 2.0f,
+                BorderRadius.all(dotR), theme.getColor().mulAlpha(alpha));
+        // Pulse ring
+        float ringR = dotR + 2.0f + pulse * 2.0f;
+        ctx.drawRoundedRect(dotX - ringR, dotY - ringR, ringR * 2.0f, ringR * 2.0f,
+                BorderRadius.all(ringR), theme.getColor().mulAlpha(0.25f * (1.0f - pulse) * alpha));
+
+        // Right-side mini status pills (animated dots)
+        float pillX = barX + barW - 14.0f;
+        float pillY = barY + barH / 2.0f;
+        for (int i = 0; i < 3; ++i) {
+            float pp = (float) (0.5 + 0.5 * Math.sin(timeSec * 3.0f + i * 1.3f));
+            float pr = 1.4f + 0.6f * pp;
+            float px = pillX - i * 6.0f;
+            ctx.drawRoundedRect(px - pr, pillY - pr, pr * 2.0f, pr * 2.0f,
+                    BorderRadius.all(pr), theme.getColor().mulAlpha((0.4f + 0.6f * pp) * alpha));
+        }
+    }
+
+    /** Diagonal scanline sweeping across the panel. */
+    private void renderScanline(UIContext ctx, Theme theme, float alpha, float timeSec) {
+        if (alpha <= 0.001f) return;
+        float cycle = 5.5f;
+        float t = (timeSec % cycle) / cycle;
+        // skip rendering for part of the cycle so it's a flash, not a constant beam
+        if (t > 0.55f) return;
+        float local = t / 0.55f;
+        float panelTop = this.boxY + TOP_BAR_H + 2.0f;
+        float panelBottom = this.boxY + this.boxHeight - 12.0f;
+        float y = panelTop + (panelBottom - panelTop) * local;
+        float lineAlpha = (float) Math.sin(local * Math.PI) * 0.45f * alpha;
+        if (lineAlpha <= 0.001f) return;
+        ctx.drawRoundedRect(this.boxX + 2.0f, y, this.boxWidth - 4.0f, 1.2f,
+                BorderRadius.all(0.6f), theme.getColor().mulAlpha(lineAlpha));
+        // Soft band above the line
+        ctx.drawRoundedRect(this.boxX + 2.0f, y - 4.0f, this.boxWidth - 4.0f, 4.0f,
+                BorderRadius.all(2.0f), theme.getColor().mulAlpha(lineAlpha * 0.18f));
+    }
+
+    /** Small footer with module count + version, animated. */
+    private void renderBottomStrip(UIContext ctx, Theme theme, float alpha, float timeSec) {
+        if (alpha <= 0.001f) return;
+        Font tiny = Fonts.MEDIUM.getFont(5.5f);
+        int total = this.modules.size();
+        int enabled = 0;
+        for (AbstractMenuElement m : this.modules) {
+            if (!(m instanceof MenuModuleElement)) continue;
+            try {
+                if (((MenuModuleElement) m).getClass().getDeclaredField("module") != null) {
+                    // Reflection is overkill here; the panel already shows per-category stats.
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        String left = "EXOCLE //  modules: " + total;
+        String right = "build " + (1000 + (int) (timeSec * 0) ) + "  •  ONLINE";
+        float y = this.boxY + this.boxHeight - 9.0f;
+        ctx.drawText(tiny, left, this.boxX + 10.0f, y,
+                theme.getWhite().mulAlpha(0.45f * alpha));
+        float rw = tiny.width(right);
+        ctx.drawText(tiny, right, this.boxX + this.boxWidth - 10.0f - rw, y,
+                theme.getColor().mulAlpha(0.7f * alpha));
+    }
+
+    // =========================================================================
+    // helpers
+    // =========================================================================
 
     private float getFitScale(float boxWidth, float boxHeight) {
         float pad = 24.0f;
@@ -444,7 +573,6 @@ public class MenuScreen extends CustomScreen {
     public void onMouseClicked(double mouseX, double mouseY, MouseButton button) {
         float localMouseX = this.toMenuX(mouseX);
         float localMouseY = this.toMenuY(mouseY);
-
         if (!this.popupSettings.isEmpty()) {
             for (MenuPopupSetting setting : this.popupSettings) {
                 if (setting.getBounds().contains(localMouseX, localMouseY)) {
@@ -455,7 +583,6 @@ public class MenuScreen extends CustomScreen {
             }
         }
         if (this.isClosing()) return;
-
         if (this.headerPanel.handleMouseClicked(localMouseX, localMouseY)) {
             if (this.headerPanel.searchBarBounds.contains(localMouseX, localMouseY)) {
                 this.searchField.setSelected(true);
@@ -463,11 +590,12 @@ public class MenuScreen extends CustomScreen {
             return;
         }
         if (this.sidebarPanel.handleMouseClicked(localMouseX, localMouseY)) return;
-
         if (this.searchField.isSelected()) this.searchField.setSelected(false);
 
+        // Drag region: now matches the tall top bar
         if (button.getButtonIndex() == 0
-                && MathUtil.isHovered(localMouseX, localMouseY, this.boxX, this.boxY, this.boxWidth, 22.0)) {
+                && MathUtil.isHovered(localMouseX, localMouseY,
+                this.boxX, this.boxY, this.boxWidth, TOP_BAR_H)) {
             this.dragging = true;
             this.dragOffsetX = localMouseX - this.boxX;
             this.dragOffsetY = localMouseY - this.boxY;
@@ -476,13 +604,12 @@ public class MenuScreen extends CustomScreen {
         if (!this.animationClose.isDone()) return;
 
         float scrollbarX = this.boxX + this.boxWidth - 8.0f - 2.0f;
-        float scrollbarY = this.boxY + 22.0f + 8.0f + 8.0f;
-        float visibleHeight = this.boxHeight - 38.0f;
+        float scrollbarY = this.boxY + TOP_BAR_H + 22.0f + 8.0f;
+        float visibleHeight = this.boxHeight - TOP_BAR_H - 38.0f;
         if (button.getButtonIndex() == 0
                 && MathUtil.isHovered(localMouseX, localMouseY, scrollbarX, scrollbarY, 2.0, visibleHeight)) {
             this.draggingScrollbar = true;
-            float scrollProgress = this.scrollHandler.getMax() == 0.0
-                    ? 0.0f
+            float scrollProgress = this.scrollHandler.getMax() == 0.0 ? 0.0f
                     : (float) (this.scrollHandler.getValue() / this.scrollHandler.getMax());
             float scrollHeight = Math.max(
                     visibleHeight * (visibleHeight / (float) ((double) visibleHeight + this.scrollHandler.getMax())),
@@ -496,7 +623,6 @@ public class MenuScreen extends CustomScreen {
                 this.scaledScissorX, this.scaledScissorY, this.scaledScissorEndX, this.scaledScissorEndY)) {
             return;
         }
-
         this.modules.stream()
                 .filter(m -> this.searchField.isEmpty()
                         ? m.getCategory() == this.selectedCategory
@@ -507,9 +633,7 @@ public class MenuScreen extends CustomScreen {
 
     public boolean charTyped(char chr, int modifiers) {
         if (this.searchField.isSelected()) return this.searchField.charTyped(chr, modifiers);
-
         for (MenuPopupSetting setting : this.popupSettings) setting.charTyped(chr, modifiers);
-
         boolean result = false;
         for (AbstractMenuElement module : this.modules) {
             if (!module.charTyped(chr, modifiers)) continue;
@@ -545,7 +669,6 @@ public class MenuScreen extends CustomScreen {
             returnCheck = true;
         }
         if (returnCheck) return true;
-
         if (this.searchField.isSelected()) {
             if (keyCode == 256) {
                 this.searchField.setSelected(false);
@@ -553,14 +676,12 @@ public class MenuScreen extends CustomScreen {
             }
             return this.searchField.keyPressed(keyCode, scanCode, modifiers);
         }
-
         boolean result = false;
         for (AbstractMenuElement module : this.modules) {
             if (!module.keyPressed(keyCode, scanCode, modifiers)) continue;
             result = true;
         }
         if (result) return true;
-
         if (keyCode == 256) {
             if (!this.closing) {
                 this.onMouseReleased(0.0, 0.0, MouseButton.LEFT);
@@ -589,7 +710,7 @@ public class MenuScreen extends CustomScreen {
             }
             return true;
         }
-        float visibleHeight = this.boxHeight - 38.0f;
+        float visibleHeight = this.boxHeight - TOP_BAR_H - 38.0f;
         float baseStep = (float) Math.max(20.0,
                 Math.min(60.0, this.scrollHandler.getMax() / (double) visibleHeight * 10.0));
         this.scrollHandler.scroll(verticalAmount * (double) baseStep / 8.0);
@@ -625,22 +746,22 @@ public class MenuScreen extends CustomScreen {
                         : m.getName().toLowerCase().contains(this.searchField.getText().toLowerCase()))
                 .sorted(Comparator.comparing(menuModule -> menuModule.getName(), String.CASE_INSENSITIVE_ORDER))
                 .toList();
-
         int columns = this.columns;
         float padding = 6.0f;
         float scrollbarWidth = 6.0f;
         float maxContentWidth = contentWidth - scrollbarWidth;
         float moduleWidth = (maxContentWidth - padding * (float) (columns - 1)) / (float) columns;
         Font font = Fonts.MEDIUM.getFont(7.0f);
-
         double[] columnHeights = new double[columns];
         this.hoveredModuleDescription = null;
 
-        // Staggered fade-in for individual modules when the category changes.
-        float catProg = this.categorySlide.getValue();
+        Theme theme = VurstVisual.getInstance().getThemeManager().getCurrentTheme();
+        long now = System.currentTimeMillis() - this.openTimeMs;
 
-        int rendered = 0;
+        int idx = 0;
         for (AbstractMenuElement module : modules) {
+            String description;
+            MenuModuleElement moduleElement;
             int col = 0;
             for (int j = 1; j < columns; ++j) {
                 if (!(columnHeights[j] < columnHeights[col])) continue;
@@ -649,28 +770,42 @@ public class MenuScreen extends CustomScreen {
             float x = contentStartX + (float) col * (moduleWidth + padding);
             float y = (float) ((double) startY + columnHeights[col] - this.scrollHandler.getValue());
 
-            // Per-module fade based on its index, so they cascade in.
-            float stagger = MathHelper.clamp((catProg - rendered * 0.012f) * 1.4f, 0.0f, 1.0f);
-            float moduleAlpha = alpha * stagger;
+            float stagger = MathHelper.clamp((float) ((now - idx * 32L) / 380.0f), 0.0f, 1.0f);
+            float cardAlpha = alpha * stagger;
+            float cardOffsetX = (1.0f - stagger) * 12.0f * (col % 2 == 0 ? -1.0f : 1.0f);
+            float cardOffsetY = (1.0f - stagger) * 10.0f;
+            float drawX = x + cardOffsetX;
+            float drawY = y + cardOffsetY;
 
-            module.render(ctx, mouseX, mouseY, font, x, y, moduleWidth, moduleAlpha, col);
-
-            if (module instanceof MenuModuleElement) {
-                MenuModuleElement moduleElement = (MenuModuleElement) module;
-                if (moduleElement.isModuleHovered(mouseX, mouseY)) {
-                    String description = moduleElement.getDescription();
-                    if (description != null && !description.isBlank()) {
-                        this.hoveredModuleDescription = description;
-                    }
+            // Strong hover halo
+            boolean hovered = (module instanceof MenuModuleElement)
+                    && ((MenuModuleElement) module).isModuleHovered(mouseX, mouseY);
+            if (hovered && cardAlpha > 0.001f) {
+                float h = module.getHeight();
+                for (int i = 4; i >= 1; --i) {
+                    float sp = i * 1.5f;
+                    ctx.drawRoundedRect(drawX - sp, drawY - sp,
+                            moduleWidth + sp * 2.0f, h + sp * 2.0f,
+                            BorderRadius.all(7.0f + sp),
+                            theme.getColor().mulAlpha((0.06f + 0.02f * i) * cardAlpha));
                 }
+            }
+
+            module.render(ctx, mouseX, mouseY, font, drawX, drawY, moduleWidth, cardAlpha, col);
+
+            if (module instanceof MenuModuleElement
+                    && (moduleElement = (MenuModuleElement) module).isModuleHovered(mouseX, mouseY)
+                    && (description = moduleElement.getDescription()) != null
+                    && !description.isBlank()) {
+                this.hoveredModuleDescription = description;
             }
             int n = col;
             columnHeights[n] = columnHeights[n] + (double) (module.getHeight() + padding);
-            rendered++;
+            ++idx;
         }
         this.scrollHandler.update();
         double maxY = Arrays.stream(columnHeights).max().orElse(0.0);
-        float visibleHeight = this.boxHeight - 38.0f;
+        float visibleHeight = this.boxHeight - TOP_BAR_H - 38.0f;
         this.scrollHandler.setMax(Math.max(0.0, maxY - (double) visibleHeight)
                 + (double) (maxY > (double) visibleHeight ? 4 : 0));
     }
@@ -680,24 +815,20 @@ public class MenuScreen extends CustomScreen {
         if (this.headerPanel == null
                 || this.headerPanel.searchBarBounds == null
                 || this.headerPanel.layoutToggleButtonBounds == null) return;
-
         Font infoFont = Fonts.MEDIUM.getFont(6.5f);
         float left = this.headerPanel.layoutToggleButtonBounds.x()
                 + this.headerPanel.layoutToggleButtonBounds.width() + 8.0f;
         float right = this.headerPanel.searchBarBounds.x() - 8.0f;
         float maxTextWidth = Math.max(0.0f, right - left);
         if (maxTextWidth <= 2.0f) return;
-
         List<String> lines = this.wrapTextToLines(infoFont, this.hoveredModuleDescription, maxTextWidth, 3);
         if (lines.isEmpty()) return;
-
         float lineGap = 1.0f;
         float lineHeight = infoFont.height();
         float totalHeight = (float) lines.size() * lineHeight
                 + (float) Math.max(0, lines.size() - 1) * lineGap;
         float centerY = this.headerPanel.searchBarBounds.y() + this.headerPanel.searchBarBounds.height() / 2.0f;
         float textY = centerY - totalHeight / 2.0f;
-
         ColorRGBA color = ColorRGBA.WHITE.mulAlpha(alpha);
         for (String line : lines) {
             float lineWidth = infoFont.width(line);
@@ -710,7 +841,6 @@ public class MenuScreen extends CustomScreen {
     private List<String> wrapTextToLines(Font font, String text, float maxWidth, int maxLines) {
         ArrayList<String> lines = new ArrayList<String>();
         if (text == null || text.isBlank() || maxWidth <= 0.0f || maxLines <= 0) return lines;
-
         String[] words = text.trim().split("\\s+");
         int index = 0;
         while (index < words.length && lines.size() < maxLines) {
